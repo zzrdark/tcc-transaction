@@ -7,7 +7,10 @@ import org.mengyun.tcctransaction.repository.helper.JedisCallback;
 import org.mengyun.tcctransaction.repository.helper.RedisHelper;
 import org.mengyun.tcctransaction.serializer.KryoPoolSerializer;
 import org.mengyun.tcctransaction.serializer.ObjectSerializer;
-import redis.clients.jedis.*;
+import org.mengyun.tcctransaction.utils.RedisUtils;
+import redis.clients.jedis.Jedis;
+import redis.clients.jedis.JedisPool;
+import redis.clients.jedis.Pipeline;
 
 import javax.transaction.xa.Xid;
 import java.util.*;
@@ -22,17 +25,15 @@ import java.util.*;
  */
 public class RedisTransactionRepository extends CachableTransactionRepository {
 
-    private static final Logger logger = Logger.getLogger(RedisTransactionRepository.class.getSimpleName());
+    static final Logger logger = Logger.getLogger(RedisTransactionRepository.class.getSimpleName());
 
     private JedisPool jedisPool;
 
     private String keyPrefix = "TCC:";
 
-    private int fetchKeySize = 1000;
+    private int fetchKeySize = RedisUtils.DEFAULT_FETCH_KEY_SIZE;
 
-    private boolean isSupportScan = true;
-
-    private boolean isForbiddenKeys = false;
+    private boolean supportScan;
 
     public void setKeyPrefix(String keyPrefix) {
         this.keyPrefix = keyPrefix;
@@ -58,21 +59,7 @@ public class RedisTransactionRepository extends CachableTransactionRepository {
 
     public void setJedisPool(JedisPool jedisPool) {
         this.jedisPool = jedisPool;
-        isSupportScan = RedisHelper.isSupportScanCommand(jedisPool.getResource());
-        if (!isSupportScan && isForbiddenKeys) {
-            throw new RuntimeException("Redis not support 'scan' command, " +
-                    "and 'keys' command is forbidden, " +
-                    "try update redis version higher than 2.8.0 " +
-                    "or set 'isForbiddenKeys' to false");
-        }
-    }
-
-    public void setSupportScan(boolean isSupportScan) {
-        this.isSupportScan = isSupportScan;
-    }
-
-    public void setForbiddenKeys(boolean forbiddenKeys) {
-        isForbiddenKeys = forbiddenKeys;
+        supportScan = RedisHelper.isSupportScanCommand(jedisPool.getResource());
     }
 
     @Override
@@ -84,7 +71,6 @@ public class RedisTransactionRepository extends CachableTransactionRepository {
 
                 @Override
                 public Long doInJedis(Jedis jedis) {
-
 
                     List<byte[]> params = new ArrayList<byte[]>();
 
@@ -125,7 +111,7 @@ public class RedisTransactionRepository extends CachableTransactionRepository {
                     }
 
                     Object result = jedis.eval(String.format("if redis.call('hget',KEYS[1],'VERSION') == '%s' then redis.call('hmset', KEYS[1], unpack(ARGV)); return 1; end; return 0;",
-                            transaction.getVersion() - 1).getBytes(),
+                                    transaction.getVersion() - 1).getBytes(),
                             Arrays.asList(RedisHelper.getRedisKey(keyPrefix, transaction.getXid())), params);
 
                     return (Long) result;
@@ -199,33 +185,8 @@ public class RedisTransactionRepository extends CachableTransactionRepository {
 
         try {
 
-            final Set<byte[]> keys = RedisHelper.execute(jedisPool, new JedisCallback<Set<byte[]>>() {
-                @Override
-                public Set<byte[]> doInJedis(Jedis jedis) {
 
-                    if (isSupportScan) {
-                        List<String> allKeys = new ArrayList<String>();
-                        String cursor = RedisHelper.SCAN_INIT_CURSOR;
-                        ScanParams scanParams = RedisHelper.buildDefaultScanParams(keyPrefix + "*", fetchKeySize);
-                        do {
-                            ScanResult<String> scanResult = jedis.scan(cursor, scanParams);
-                            allKeys.addAll(scanResult.getResult());
-                            cursor = scanResult.getStringCursor();
-                        } while (!cursor.equals(RedisHelper.SCAN_INIT_CURSOR));
-
-                        Set<byte[]> allKeySet = new HashSet<byte[]>();
-
-                        for (String key : allKeys) {
-                            allKeySet.add(key.getBytes());
-                        }
-                        logger.info(String.format("find all key by scan command with pattern:%s allKeySet.size()=%d", keyPrefix + "*", allKeySet.size()));
-                        return allKeySet;
-                    } else {
-                        return jedis.keys((keyPrefix + "*").getBytes());
-                    }
-
-                }
-            });
+            final List<byte[]> keys = RedisHelper.getAllKeys(jedisPool, keyPrefix);
 
 
             return RedisHelper.execute(jedisPool, new JedisCallback<List<Transaction>>() {
@@ -257,4 +218,6 @@ public class RedisTransactionRepository extends CachableTransactionRepository {
             throw new TransactionIOException(e);
         }
     }
+
+
 }

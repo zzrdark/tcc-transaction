@@ -14,6 +14,7 @@ public class TransactionContext implements Serializable {
 
     private int status;
 
+    // 保存当前事务有几个子事务
     private Map<String, String> attachments = new ConcurrentHashMap<String, String>();
 
     public TransactionContext() {

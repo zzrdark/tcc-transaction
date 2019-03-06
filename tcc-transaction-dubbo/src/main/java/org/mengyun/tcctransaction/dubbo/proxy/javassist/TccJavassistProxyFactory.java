@@ -11,6 +11,11 @@ public class TccJavassistProxyFactory extends JavassistProxyFactory {
 
     @SuppressWarnings("unchecked")
     public <T> T getProxy(Invoker<T> invoker, Class<?>[] interfaces) {
+
+        for(Class cls : interfaces){
+            System.err.println("TccJavassistProxyFactory getProxy-cls="+cls.getSimpleName());
+        }
+
         return (T) TccProxy.getProxy(interfaces).newInstance(new InvokerInvocationHandler(invoker));
     }
 }

@@ -20,8 +20,10 @@ public class Participant implements Serializable {
 
     private InvocationContext cancelInvocationContext;
 
+    // 封装了反射调用的一些基本内容 -> 建议多反射的基本API
     private Terminator terminator = new Terminator();
 
+    // 这里其实主要封装了一个TransactionContext对象
     Class<? extends TransactionContextEditor> transactionContextEditorClass;
 
     public Participant() {
@@ -45,10 +47,12 @@ public class Participant implements Serializable {
         this.xid = xid;
     }
 
+    // 事务处理器 -》 通过反射调用我们预先设置好的失败方法
     public void rollback() {
         terminator.invoke(new TransactionContext(xid, TransactionStatus.CANCELLING.getId()), cancelInvocationContext, transactionContextEditorClass);
     }
 
+    // 事务处理器 -》 通过反射调用我们预先设置好的确认方法
     public void commit() {
         terminator.invoke(new TransactionContext(xid, TransactionStatus.CONFIRMING.getId()), confirmInvocationContext, transactionContextEditorClass);
     }

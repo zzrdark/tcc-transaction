@@ -89,7 +89,7 @@ public class TransactionManager {
             commitTransaction(transaction);
         }
     }
-
+    
 
     public void rollback(boolean asyncRollback) {
 
@@ -145,6 +145,8 @@ public class TransactionManager {
         return null;
     }
 
+    // 当前是否有一个事务存在
+    // 隔离性
     public boolean isTransactionActive() {
         Deque<Transaction> transactions = CURRENT.get();
         return transactions != null && !transactions.isEmpty();
@@ -165,14 +167,12 @@ public class TransactionManager {
             Transaction currentTransaction = getCurrentTransaction();
             if (currentTransaction == transaction) {
                 CURRENT.get().pop();
-                if (CURRENT.get().size() == 0) {
-                    CURRENT.remove();
-                }
             } else {
                 throw new SystemException("Illegal transaction when clean after completion");
             }
         }
     }
+
 
     public void enlistParticipant(Participant participant) {
         Transaction transaction = this.getCurrentTransaction();

@@ -90,8 +90,6 @@ public class ReflectionUtils {
             return 0;
         } else if (double.class.equals(type)) {
             return 0;
-        } else if (char.class.equals(type)){
-            return ' ';
         }
 
         return null;

@@ -43,22 +43,32 @@ public class CompensableTransactionInterceptor {
 
     public Object interceptCompensableMethod(ProceedingJoinPoint pjp) throws Throwable {
 
+        // 通过上下文对象，获取待访问对象的方法名称【makePayment】
         Method method = CompensableMethodUtils.getCompensableMethod(pjp);
 
+        // 获取目标对象的Compensable注解
         Compensable compensable = method.getAnnotation(Compensable.class);
+
+        // 获取目标对象的事务传播属性
         Propagation propagation = compensable.propagation();
+
+        // 获取事务上下文
         TransactionContext transactionContext = FactoryBuilder.factoryOf(compensable.transactionContextEditor()).getInstance().get(pjp.getTarget(), method, pjp.getArgs());
 
+        //
         boolean asyncConfirm = compensable.asyncConfirm();
 
         boolean asyncCancel = compensable.asyncCancel();
 
+        // 判断当前是否有存在的事务队列
         boolean isTransactionActive = transactionManager.isTransactionActive();
 
         if (!TransactionUtils.isLegalTransactionContext(isTransactionActive, propagation, transactionContext)) {
             throw new SystemException("no active compensable transaction while propagation is mandatory for method " + method.getName());
         }
 
+        // 判断当前事务角色
+        // ROOT-> 主事务   Provider->事务参与者
         MethodType methodType = CompensableMethodUtils.calculateMethodType(propagation, isTransactionActive, transactionContext);
 
         switch (methodType) {
@@ -71,7 +81,16 @@ public class CompensableTransactionInterceptor {
         }
     }
 
+    /*
+        In拦截器：
+            1、开启全局事务
+            2、持久化全局事务
+            3、注册全局事务
+            4、判断是应该Confirm还是cancel
+            5、清除事务
+        OUT拦截器：
 
+     */
     private Object rootMethodProceed(ProceedingJoinPoint pjp, boolean asyncConfirm, boolean asyncCancel) throws Throwable {
 
         Object returnValue = null;
@@ -79,26 +98,43 @@ public class CompensableTransactionInterceptor {
         Transaction transaction = null;
 
         try {
-
+            //  开启一个全新的事务
+            /*
+                1、持久化事务形态 -> 全局事务编号
+                2、注册一个事务【Threadlocal】
+             */
             transaction = transactionManager.begin();
 
             try {
+                // 执行目标方法
                 returnValue = pjp.proceed();
+
+                // 如果抛出异常
             } catch (Throwable tryingException) {
 
                 if (!isDelayCancelException(tryingException)) {
                    
                     logger.warn(String.format("compensable transaction trying failed. transaction content:%s", JSON.toJSONString(transaction)), tryingException);
-
+                    /*
+                        1、修改数据库状态
+                        2、执行rollback方法
+                        3、如果执行成功，则删除事务资源数据
+                     */
                     transactionManager.rollback(asyncCancel);
                 }
 
                 throw tryingException;
             }
 
+            /*
+                1、修改数据库状态
+                2、执行confirm方法
+                3、如果执行成功，则删除事务资源数据
+             */
             transactionManager.commit(asyncConfirm);
 
         } finally {
+            // 清除队列中的事务
             transactionManager.cleanAfterCompletion(transaction);
         }
 
@@ -112,10 +148,13 @@ public class CompensableTransactionInterceptor {
 
             switch (TransactionStatus.valueOf(transactionContext.getStatus())) {
                 case TRYING:
+                    // 初始化一份事务参与者的数据进入到当前服务中
+                    // 注册事务
                     transaction = transactionManager.propagationNewBegin(transactionContext);
                     return pjp.proceed();
                 case CONFIRMING:
                     try {
+                        // 修改状态
                         transaction = transactionManager.propagationExistBegin(transactionContext);
                         transactionManager.commit(asyncConfirm);
                     } catch (NoExistedTransactionException excepton) {
@@ -134,6 +173,7 @@ public class CompensableTransactionInterceptor {
             }
 
         } finally {
+            // 清除事务
             transactionManager.cleanAfterCompletion(transaction);
         }
 

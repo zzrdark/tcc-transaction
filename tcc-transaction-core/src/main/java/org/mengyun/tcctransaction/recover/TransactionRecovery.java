@@ -41,8 +41,10 @@ public class TransactionRecovery {
         return transactionRepository.findAllUnmodifiedSince(new Date(currentTimeInMillis - recoverConfig.getRecoverDuration() * 1000));
     }
 
+    /*
+        1、按配置进行事务重试
+     */
     private void recoverErrorTransactions(List<Transaction> transactions) {
-
 
         for (Transaction transaction : transactions) {
 
